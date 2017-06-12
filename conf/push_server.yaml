@@ -1,2 +1,1 @@
-listen: 8089
-worker_processes: 3
+listen: 9090
