@@ -1,10 +1,18 @@
 <?php
 
 $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
-$connection = socket_connect($socket, '127.0.0.1', '8089');
+$connection = socket_connect($socket, '127.0.0.1', '9090');
 
-$strMsg = "http://pws.myhug.cn/npic/p/9/ff5839a4edffe15bfe9fe78cc49a4ebb0c49218dbf3819\n";
-$strMsg = "http://pws.myhug.cn/npic/p/9/ff5839e3f663949a331a21ab99a8bafd3713f98807b57c\n";
+$arrData = array(
+    array(
+        'type' => 1,
+        'token' => "282695f6d4176375a6e44639d8645a91b5827df649a6b28978b239695ef0babe",
+        'payload' => '{"aps":{"alert":{"body":"abc","launch-image":"icon_120"},"sound":"default","badge":1},"avalon":{"type":"msg"}}',
+    ),
+);
+$strMsg = json_encode($arrData);
+$strMsg .= "\0";
+
 $intLen = strlen( $strMsg );
 if( socket_write( $socket, $strMsg, $intLen ) != $intLen ) {
     echo "send query fail\n";
@@ -12,9 +20,6 @@ if( socket_write( $socket, $strMsg, $intLen ) != $intLen ) {
 }
 echo "send query succ\n";
 
-$strResult = '';
-while( $buff = @socket_read($socket, 1000, PHP_NORMAL_READ) ) {  
-    $strResult .= $buff;
-}
-echo $strResult;
+$strResult = socket_read($socket, 1024);
+var_dump( $strResult );
 socket_close($socket); 

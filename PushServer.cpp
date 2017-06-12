@@ -11,17 +11,25 @@ PushServer* PushServer::getInstance()
     return pInstance;
 }
 
-void PushServer::readTimeoutCB( int intFd )
+SocketConnection* PushServer::getConnection( int intFd )
 {
     connectionMap::iterator it;
     it = mapConnection.find( intFd );
     if( it == mapConnection.end() )
     {
-        return;
+        LOG(WARNING) << "connection not found, fd=" << intFd;
+        return NULL;
     }
-    SocketConnection* pConnection = it->second;
+    return it->second;
+}
+
+void PushServer::readTimeoutCB( int intFd )
+{
     LOG(WARNING) << "read timeout, fd=" << intFd;
-    delete pConnection;
+    SocketConnection* pConnection = getConnection( intFd );
+    if( pConnection != NULL ) {
+        delete pConnection;
+    }
 }
 
 static void readTimeoutCallback( EV_P_ ev_timer *timer, int revents )
@@ -33,15 +41,11 @@ static void readTimeoutCallback( EV_P_ ev_timer *timer, int revents )
 
 void PushServer::writeTimeoutCB( int intFd )
 {
-    connectionMap::iterator it;
-    it = mapConnection.find( intFd );
-    if( it == mapConnection.end() )
-    {
-        return;
-    }
-    SocketConnection* pConnection = it->second;
     LOG(WARNING) << "write timeout, fd=" << intFd;
-    delete pConnection;
+    SocketConnection* pConnection = getConnection( intFd );
+    if( pConnection != NULL ) {
+        delete pConnection;
+    }
 }
 
 static void writeTimeoutCallback( EV_P_ ev_timer *timer, int revents )
@@ -51,8 +55,14 @@ static void writeTimeoutCallback( EV_P_ ev_timer *timer, int revents )
     PushServer::getInstance()->writeTimeoutCB( ((SocketConnection *)timer->data)->intFd );
 }
 
-void PushServer::ackQuery( SocketConnection *pConnection )
+void PushServer::writeCB( int intFd )
 {
+    SocketConnection* pConnection = getConnection( intFd );
+    if( pConnection == NULL )
+    {
+        return;
+    }
+
     SocketBuffer *outBuf = NULL;
     while( ! pConnection->outBufList.empty() )
     {
@@ -68,6 +78,7 @@ void PushServer::ackQuery( SocketConnection *pConnection )
                 {
                     return;
                 } else {
+                    LOG(WARNING) << "send fail, fd=" << pConnection->intFd;
                     delete pConnection;
                     return;
                 }
@@ -78,31 +89,12 @@ void PushServer::ackQuery( SocketConnection *pConnection )
         {
             pConnection->outBufList.pop_front();
             delete outBuf;
-
-            if( pConnection->status == csClosing )
-            {
-                LOG(INFO) << "close succ, fd=" << pConnection->intFd;
-                delete pConnection;
-                return;
-            } else {
-                LOG(INFO) << "ack query succ, fd=" << pConnection->intFd;
-            }
         }
     }
 
-    delete pConnection;
-}
-
-void PushServer::writeCB( int intFd )
-{
-    connectionMap::iterator it;
-    it = mapConnection.find( intFd );
-    if( it == mapConnection.end() )
-    {
-        return;
-    }
-    SocketConnection* pConnection = it->second;
-    ackQuery( pConnection );
+    ev_io_stop( pMainLoop, pConnection->writeWatcher );
+    ev_timer_stop( pMainLoop, pConnection->writeTimer );
+    LOG(INFO) << "ack query succ, fd=" << pConnection->intFd;
 }
 
 static void writeCallback( EV_P_ ev_io *watcher, int revents )
@@ -114,9 +106,7 @@ static void writeCallback( EV_P_ ev_io *watcher, int revents )
 
 void PushServer::parseQuery( SocketConnection *pConnection )
 {
-    pConnection->inBuf->data[pConnection->inBuf->intLen-1] = '\0';
-
-    CURLcode res;
+    /*CURLcode res;
     CURL *curl;
     curl = curl_easy_init();
     curl_easy_setopt( curl, CURLOPT_URL, pConnection->inBuf->data );  
@@ -128,7 +118,7 @@ void PushServer::parseQuery( SocketConnection *pConnection )
         //TODO
         return;
     }
-    curl_easy_cleanup( curl );
+    curl_easy_cleanup( curl );*/
 
     char outText[6] = "hello";
     int outTextLen = strlen( outText );
@@ -137,40 +127,33 @@ void PushServer::parseQuery( SocketConnection *pConnection )
     outBuf->intLen = outTextLen;
     strncpy( (char*)outBuf->data, outText, outTextLen+1 );
     pConnection->outBufList.push_back( outBuf );
-    delete[] outText;
 
     pConnection->inBuf->intLen = 0;
     pConnection->inBuf->intExpectLen = 0;
 
     ev_io_start( pMainLoop, pConnection->writeWatcher );
-
-    ev_now_update( pMainLoop );
     ev_timer_set( pConnection->writeTimer, pConnection->writeTimeout, 0.0 );
     ev_timer_start( pMainLoop, pConnection->writeTimer );
 }
 
-void PushServer::closeConnection( SocketConnection *pConnection )
+void PushServer::readCB( int intFd )
 {
-    SocketBuffer* outBuf = new SocketBuffer( 2 );
-    outBuf->data[0] = 0x88;
-    outBuf->data[1] = 0;
-    outBuf->intLen = 2;
-    pConnection->outBufList.push_back( outBuf );
+    SocketConnection* pConnection = getConnection( intFd );
+    if( pConnection == NULL )
+    {
+        return;
+    }
 
-    pConnection->status = csClosing;
-    ev_io_start(pMainLoop, pConnection->writeWatcher);
+    if( pConnection->inBuf->intLen >= pConnection->inBuf->intSize )
+    {
+        pConnection->inBuf->enlarge();
+    }
 
-    ev_timer_set( pConnection->writeTimer, pConnection->writeTimeout, 0.0 );
-    ev_timer_start( pMainLoop, pConnection->writeTimer );
-}
-
-void PushServer::recvQuery( SocketConnection *pConnection )
-{
     int n = recv( pConnection->intFd, pConnection->inBuf->data + pConnection->inBuf->intLen, pConnection->inBuf->intSize - pConnection->inBuf->intLen, 0 );
     if( n > 0 )
     {
         pConnection->inBuf->intLen += n;
-        if( pConnection->inBuf->data[pConnection->inBuf->intLen-1] == '\n' )
+        if( pConnection->inBuf->data[pConnection->inBuf->intLen-1] == '\0' )
         {
             LOG(INFO) << "recv query, fd=" << pConnection->intFd;
             ev_timer_stop( pMainLoop, pConnection->readTimer );
@@ -178,6 +161,7 @@ void PushServer::recvQuery( SocketConnection *pConnection )
         }
     } else if( n == 0 )
     {
+        // client close normally
         delete pConnection;
         return;
     } else {
@@ -185,27 +169,11 @@ void PushServer::recvQuery( SocketConnection *pConnection )
         {
             return;
         } else {
+            LOG(WARNING) << "recv fail, fd=" << pConnection->intFd;
             delete pConnection;
             return;
         }
     }
-}
-
-void PushServer::readCB( int intFd )
-{
-    connectionMap::iterator it;
-    it = mapConnection.find( intFd );
-    if( it == mapConnection.end() )
-    {
-        return;
-    }
-    SocketConnection* pConnection = it->second;
-
-    if( pConnection->inBuf->intLen >= pConnection->inBuf->intSize )
-    {
-        pConnection->inBuf->enlarge();
-    }
-    recvQuery( pConnection );
 }
 
 static void readCallback( EV_P_ ev_io *watcher, int revents )
@@ -226,14 +194,14 @@ void PushServer::acceptCB()
         {
             return;
         } else {
-            //TODO close process
+            LOG(WARNING) << "accept fail";
             return;
         }
     }
 
     int flag = fcntl(acceptFd, F_GETFL, 0);
     fcntl(acceptFd, F_SETFL, flag | O_NONBLOCK);
-    LOG(INFO) << "accept fd=" << acceptFd;
+    LOG(INFO) << "accept succ, fd=" << acceptFd;
 
     SocketConnection* pConnection = new SocketConnection();
     pConnection->pLoop = pMainLoop;

@@ -53,6 +53,7 @@ class PushServer
         connectionMap mapConnection;
     public:
         static PushServer *getInstance();
+        SocketConnection* getConnection( int intFd );
         void start();
         void acceptCB();
         void readCB( int intFd );
@@ -62,7 +63,6 @@ class PushServer
         void recvQuery( SocketConnection *pConnection );
         void parseQuery( SocketConnection *pConnection );
         void ackQuery( SocketConnection *pConnection );
-        void closeConnection( SocketConnection *pConnection );
 };
 
 #endif

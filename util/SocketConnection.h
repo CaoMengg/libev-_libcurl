@@ -24,7 +24,6 @@ class SocketConnection
     public:
         SocketConnection() {
             inBuf = new SocketBuffer( 1024 );
-            picBuf = new SocketBuffer( 10240 );
 
             readWatcher = new ev_io();
             writeWatcher = new ev_io();
@@ -60,10 +59,6 @@ class SocketConnection
                 delete inBuf;
             }
 
-            if( picBuf ) {
-                delete picBuf;
-            }
-
             while( ! outBufList.empty() ) {
                 delete outBufList.front();
                 outBufList.pop_front();
@@ -80,7 +75,6 @@ class SocketConnection
         ev_tstamp writeTimeout = 3.0;
 
         SocketBuffer *inBuf = NULL;
-        SocketBuffer *picBuf = NULL;
         bufferList outBufList;
 };
 
