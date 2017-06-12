@@ -12,7 +12,13 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <iostream>
 #include <map>
+
+#include "rapidjson/document.h"
+#include "rapidjson/writer.h"
+#include "rapidjson/stringbuffer.h"
+using namespace rapidjson;
 
 #include "curl/curl.h"
 #include "GLog.h"

@@ -1,7 +1,7 @@
 OBJS = util/GLog.o util/YamlConf.o util/SocketBuffer.o util/SocketConnection.o PushServer.o
 CFLAGS = -W -Wall -Wunused-value -std=c++11 -g -rdynamic
 DEPENDS = lib/glog/libglog.a lib/yaml/libyaml-cpp.a -lpthread -lev -Llib/curl/lib -lcurl
-INCLUDE = -I. -Iutil/ -Ilib/ -Ilib/curl/include
+INCLUDE = -I. -Iutil/ -Ilib/ -Ilib/curl/include -Ilib/json/include
 
 bin/push_server: main.cpp main.h $(OBJS)
 	$(CXX) $(CFLAGS) -o $@ $^ $(INCLUDE) $(DEPENDS)
