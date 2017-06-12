@@ -130,19 +130,7 @@ void PushServer::parseQuery( SocketConnection *pConnection )
     }
     curl_easy_cleanup( curl );
 
-    tesseract::TessBaseAPI *api = new tesseract::TessBaseAPI();
-    if( api->Init(NULL, "chi_sim") )
-    {
-        LOG(WARNING) << "tesseract api Init fail";
-        //TODO
-        return;
-    }
-    Pix *image = pixReadMem( pConnection->picBuf->data, pConnection->picBuf->intLen );
-    api->SetImage( image );
-    char *outText = api->GetUTF8Text();
-    api->End();
-    pixDestroy(&image);
-
+    char outText[6] = "hello";
     int outTextLen = strlen( outText );
     SocketBuffer* outBuf;
     outBuf = new SocketBuffer( outTextLen + 1 );
@@ -245,7 +233,7 @@ void PushServer::acceptCB()
 
     int flag = fcntl(acceptFd, F_GETFL, 0);
     fcntl(acceptFd, F_SETFL, flag | O_NONBLOCK);
-    LOG(INFO) << "worker_id=" << intWorkerId << ", accept fd=" << acceptFd;
+    LOG(INFO) << "accept fd=" << acceptFd;
 
     SocketConnection* pConnection = new SocketConnection();
     pConnection->pLoop = pMainLoop;
@@ -299,11 +287,10 @@ void PushServer::start()
         LOG(WARNING) << "listen fail";
         return;
     }
-    LOG(INFO) << "server start, listen succ port=" << intListenPort << " fd=" << intListenFd;
+    LOG(INFO) << "server start, listen port=" << intListenPort << " fd=" << intListenFd;
 
     listenWatcher = new ev_io();
     ev_io_init( listenWatcher, acceptCallback, intListenFd, EV_READ );
     ev_io_start( pMainLoop, listenWatcher );
     ev_run( pMainLoop, 0 );
-    LOG(INFO) << "server start, listen port=" << intListenPort << " fd=" << intListenFd;
 }
