@@ -52,14 +52,18 @@ class PushServer
 
         static PushServer *pInstance;
         YamlConf *config = NULL;
-        struct ev_loop *pMainLoop = EV_DEFAULT;
         int intListenPort = 0;
         int intListenFd = 0;
         ev_io *listenWatcher = NULL;
         connectionMap mapConnection;
+
+        CURLM *multi = NULL;
     public:
+        struct ev_loop *pMainLoop = EV_DEFAULT;
         static PushServer *getInstance();
         SocketConnection* getConnection( int intFd );
+        int intCurlRunning = 1;
+
         void start();
         void acceptCB();
         void readCB( int intFd );

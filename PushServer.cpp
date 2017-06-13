@@ -120,6 +120,10 @@ void PushServer::parseQuery( SocketConnection *pConnection )
     }
     curl_easy_cleanup( curl );*/
 
+    Document docJson;
+    docJson.Parse( (const char*) pConnection->inBuf->data );
+    LOG(INFO) << docJson[0]["token"].GetString();
+
     char outText[6] = "hello";
     int outTextLen = strlen( outText );
     SocketBuffer* outBuf;
@@ -228,8 +232,66 @@ static void acceptCallback( EV_P_ ev_io *watcher, int revents )
     PushServer::getInstance()->acceptCB();
 }
 
+static void event_cb(EV_P_ struct ev_io *w, int revents)
+{
+    std::cout << "event_cb" << std::endl;
+    int rc = curl_multi_socket_action(g->multi, w->fd, action, &g->still_running);
+}
+
+static int curlSocketCallback(CURL *e, curl_socket_t s, int what, void *cbp, void *sockp)
+{
+    std::cout << s << " : " << what << std::endl;
+
+    ev_io* ev = new ev_io();
+    ev_io_init(ev, event_cb, s, EV_WRITE);
+    ev_io_start(PushServer::getInstance()->pMainLoop, ev);
+
+    if(what == CURL_POLL_REMOVE)
+    {
+        //remsock(fdp, g);
+    }
+    else
+    {
+        /*if( ! fdp )
+          {
+        //addsock(s, e, what, g);
+        }
+        else
+        {
+        //setsock(fdp, s, e, what, g);
+        }*/
+    }
+    return 0;
+}
+
+static int curlTimerCallback(CURLM *multi, long timeout_ms, void *g)
+{
+    std::cout << "curlTimerCallback: " << timeout_ms << std::endl;
+    if( timeout_ms == 0 ) {
+        curl_multi_socket_action(multi, CURL_SOCKET_TIMEOUT, 0, &( PushServer::getInstance()->intCurlRunning) );
+    }
+    return 0;
+}
+
 void PushServer::start()
 {
+    multi = curl_multi_init();
+    curl_multi_setopt(multi, CURLMOPT_SOCKETFUNCTION, curlSocketCallback);
+    curl_multi_setopt(multi, CURLMOPT_SOCKETDATA, NULL);
+    curl_multi_setopt(multi, CURLMOPT_TIMERFUNCTION, curlTimerCallback);
+    curl_multi_setopt(multi, CURLMOPT_TIMERDATA, NULL);
+
+    /*CURL *easy = curl_easy_init();
+    curl_easy_setopt(easy, CURLOPT_URL, "http://www.baidu.com");
+    //curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, write_cb);
+    curl_easy_setopt(easy, CURLOPT_WRITEDATA, NULL);
+    curl_easy_setopt(easy, CURLOPT_VERBOSE, 1L);
+    curl_easy_setopt(easy, CURLOPT_NOPROGRESS, 0L);
+    //curl_easy_setopt(easy, CURLOPT_PROGRESSFUNCTION, prog_cb);
+    curl_easy_setopt(easy, CURLOPT_LOW_SPEED_TIME, 3L);
+    curl_easy_setopt(easy, CURLOPT_LOW_SPEED_LIMIT, 10L);
+    curl_multi_add_handle(multi, easy);*/
+
     struct sockaddr_in sin;
     sin.sin_family = AF_INET;
     sin.sin_addr.s_addr = 0;
