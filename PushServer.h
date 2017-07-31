@@ -35,6 +35,9 @@ class PushServer
         {
             config = new YamlConf( "conf/push_server.yaml" );
             intListenPort = config->getInt( "listen" );
+
+            curlMultiTimer = new ev_timer();
+            curlMultiTimer->data = this;
         }
         ~PushServer()
         {
@@ -42,6 +45,11 @@ class PushServer
             {
                 ev_io_stop(pMainLoop, listenWatcher);
                 delete listenWatcher;
+            }
+
+            if( curlMultiTimer ) {
+                ev_timer_stop(pMainLoop, curlMultiTimer);
+                delete curlMultiTimer;
             }
 
             if( intListenFd )
@@ -57,13 +65,15 @@ class PushServer
         ev_io *listenWatcher = NULL;
         connectionMap mapConnection;
 
-        CURLM *multi = NULL;
     public:
         struct ev_loop *pMainLoop = EV_DEFAULT;
         static PushServer *getInstance();
-        SocketConnection* getConnection( int intFd );
+
+        CURLM *multi = NULL;
+        ev_timer *curlMultiTimer = NULL;
         int intCurlRunning = 1;
 
+        SocketConnection* getConnection( int intFd );
         void start();
         void acceptCB();
         void readCB( int intFd );

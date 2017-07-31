@@ -24,6 +24,7 @@ class SocketConnection
     public:
         SocketConnection() {
             inBuf = new SocketBuffer( 1024 );
+            upstreamBuf = new SocketBuffer( 1024 );
 
             readWatcher = new ev_io();
             writeWatcher = new ev_io();
@@ -31,6 +32,8 @@ class SocketConnection
             readTimer->data = this;
             writeTimer = new ev_timer();
             writeTimer->data = this;
+
+            upstreamWatcher = new ev_io();
         }
         ~SocketConnection() {
             if( readWatcher && pLoop ) {
@@ -51,12 +54,21 @@ class SocketConnection
                 delete writeTimer;
             }
 
+            if( upstreamWatcher && pLoop ) {
+                ev_io_stop( pLoop, upstreamWatcher );
+                delete upstreamWatcher;
+            }
+
             if( intFd ) {
                 close( intFd );
             }
 
             if( inBuf ) {
                 delete inBuf;
+            }
+
+            if( upstreamBuf ) {
+                delete upstreamBuf;
             }
 
             while( ! outBufList.empty() ) {
@@ -74,7 +86,10 @@ class SocketConnection
         ev_timer *writeTimer = NULL;
         ev_tstamp writeTimeout = 3.0;
 
+        ev_io *upstreamWatcher = NULL;
+
         SocketBuffer *inBuf = NULL;
+        SocketBuffer *upstreamBuf = NULL;
         bufferList outBufList;
 };
 

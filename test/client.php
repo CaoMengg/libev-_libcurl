@@ -6,8 +6,8 @@ $connection = socket_connect($socket, '127.0.0.1', '9090');
 $arrData = array(
     array(
         'type' => 1,
-        'token' => "282695f6d4176375a6e44639d8645a91b5827df649a6b28978b239695ef0babe",
-        'payload' => '{"aps":{"alert":{"body":"abc","launch-image":"icon_120"},"sound":"default","badge":1},"avalon":{"type":"msg"}}',
+        'push_url' => 'http://test.myhug.cn/u/profile',
+        'push_data' => 'uId=7bf4a120e384fae695800177&yUId=yaa1c99e26cd34a57a4b99ff2374&sig=myhug20140108',
     ),
 );
 $strMsg = json_encode($arrData);
