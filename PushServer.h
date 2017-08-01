@@ -6,7 +6,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <fcntl.h>
-#include <ev.h>
+#include <ev++.h>
 
 #include <unistd.h>
 #include <string.h>
@@ -18,7 +18,6 @@
 #include "rapidjson/document.h"
 #include "rapidjson/writer.h"
 #include "rapidjson/stringbuffer.h"
-using namespace rapidjson;
 
 #include "curl/curl.h"
 #include "GLog.h"
@@ -36,25 +35,22 @@ class PushServer
             config = new YamlConf( "conf/push_server.yaml" );
             intListenPort = config->getInt( "listen" );
 
-            curlMultiTimer = new ev_timer();
+            listenWatcher = new ev::io();
+            curlMultiTimer = new ev::timer();
             curlMultiTimer->data = this;
         }
         ~PushServer()
         {
-            if( listenWatcher )
-            {
-                ev_io_stop(pMainLoop, listenWatcher);
-                delete listenWatcher;
-            }
-
-            if( curlMultiTimer ) {
-                ev_timer_stop(pMainLoop, curlMultiTimer);
-                delete curlMultiTimer;
-            }
+            delete listenWatcher;
+            delete curlMultiTimer;
 
             if( intListenFd )
             {
                 close( intListenFd );
+            }
+
+            if( multi ) {
+                curl_multi_cleanup( multi );
             }
         }
 
@@ -62,24 +58,26 @@ class PushServer
         YamlConf *config = NULL;
         int intListenPort = 0;
         int intListenFd = 0;
-        ev_io *listenWatcher = NULL;
+        ev::io *listenWatcher = NULL;
         connectionMap mapConnection;
 
     public:
-        struct ev_loop *pMainLoop = EV_DEFAULT;
+        ev::default_loop mainLoop;
         static PushServer *getInstance();
 
         CURLM *multi = NULL;
-        ev_timer *curlMultiTimer = NULL;
+        ev::timer *curlMultiTimer = NULL;
         int intCurlRunning = 1;
 
         SocketConnection* getConnection( int intFd );
         void start();
-        void acceptCB();
-        void readCB( int intFd );
-        void writeCB( int intFd );
-        void readTimeoutCB( int intFd );
-        void writeTimeoutCB( int intFd );
+
+        void acceptCB( ev::io &watcher, int revents );
+        void readCB( ev::io &watcher, int revents );
+        void writeCB( ev::io &watcher, int revents );
+        void curlSocketCB( ev::io &watcher, int revents );
+        void curlTimeoutCB( ev::timer &timer, int revents );
+
         void recvQuery( SocketConnection *pConnection );
         void parseQuery( SocketConnection *pConnection );
         void ackQuery( SocketConnection *pConnection );

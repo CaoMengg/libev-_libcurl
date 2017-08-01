@@ -23,41 +23,11 @@ SocketConnection* PushServer::getConnection( int intFd )
     return it->second;
 }
 
-void PushServer::readTimeoutCB( int intFd )
+void PushServer::writeCB( ev::io &watcher, int revents )
 {
-    LOG(WARNING) << "read timeout, fd=" << intFd;
-    SocketConnection* pConnection = getConnection( intFd );
-    if( pConnection != NULL ) {
-        delete pConnection;
-    }
-}
-
-static void readTimeoutCallback( EV_P_ ev_timer *timer, int revents )
-{
-    (void)loop;
     (void)revents;
-    PushServer::getInstance()->readTimeoutCB( ((SocketConnection *)timer->data)->intFd );
-}
 
-void PushServer::writeTimeoutCB( int intFd )
-{
-    LOG(WARNING) << "write timeout, fd=" << intFd;
-    SocketConnection* pConnection = getConnection( intFd );
-    if( pConnection != NULL ) {
-        delete pConnection;
-    }
-}
-
-static void writeTimeoutCallback( EV_P_ ev_timer *timer, int revents )
-{
-    (void)loop;
-    (void)revents;
-    PushServer::getInstance()->writeTimeoutCB( ((SocketConnection *)timer->data)->intFd );
-}
-
-void PushServer::writeCB( int intFd )
-{
-    SocketConnection* pConnection = getConnection( intFd );
+    SocketConnection* pConnection = getConnection( watcher.fd );
     if( pConnection == NULL )
     {
         return;
@@ -92,16 +62,9 @@ void PushServer::writeCB( int intFd )
         }
     }
 
-    ev_io_stop( pMainLoop, pConnection->writeWatcher );
-    ev_timer_stop( pMainLoop, pConnection->writeTimer );
+    pConnection->writeWatcher->stop();
+    pConnection->writeTimer->stop();
     LOG(INFO) << "ack query succ, fd=" << pConnection->intFd;
-}
-
-static void writeCallback( EV_P_ ev_io *watcher, int revents )
-{
-    (void)loop;
-    (void)revents;
-    PushServer::getInstance()->writeCB( watcher->fd );
 }
 
 static size_t write_cb(void *ptr, size_t size, size_t nmemb, void *data)
@@ -116,9 +79,9 @@ static size_t write_cb(void *ptr, size_t size, size_t nmemb, void *data)
 
 void PushServer::parseQuery( SocketConnection *pConnection )
 {
-    Document docJson;
+    rapidjson::Document docJson;
     docJson.Parse( (const char*) pConnection->inBuf->data );
-    //LOG(INFO) << docJson[0]["push_url"].GetString();
+    LOG(INFO) << docJson[0]["push_url"].GetString();
 
     CURL *easy = curl_easy_init();
     curl_easy_setopt(easy, CURLOPT_URL, docJson[0]["push_url"].GetString());
@@ -133,9 +96,11 @@ void PushServer::parseQuery( SocketConnection *pConnection )
     curl_multi_add_handle(multi, easy);
 }
 
-void PushServer::readCB( int intFd )
+void PushServer::readCB( ev::io &watcher, int revents )
 {
-    SocketConnection* pConnection = getConnection( intFd );
+    (void)revents;
+
+    SocketConnection* pConnection = getConnection( watcher.fd );
     if( pConnection == NULL )
     {
         return;
@@ -153,7 +118,7 @@ void PushServer::readCB( int intFd )
         if( pConnection->inBuf->data[pConnection->inBuf->intLen-1] == '\0' )
         {
             LOG(INFO) << "recv query, fd=" << pConnection->intFd;
-            ev_timer_stop( pMainLoop, pConnection->readTimer );
+            pConnection->readTimer->stop();
             parseQuery( pConnection );
         }
     } else if( n == 0 )
@@ -173,17 +138,13 @@ void PushServer::readCB( int intFd )
     }
 }
 
-static void readCallback( EV_P_ ev_io *watcher, int revents )
+void PushServer::acceptCB( ev::io &watcher, int revents )
 {
-    (void)loop;
+    (void)watcher;
     (void)revents;
-    PushServer::getInstance()->readCB( watcher->fd );
-}
 
-void PushServer::acceptCB()
-{
     struct sockaddr_storage ss;
-    socklen_t slen = sizeof(ss);
+    socklen_t slen = sizeof( ss );
     int acceptFd = accept( intListenFd, (struct sockaddr*)&ss, &slen );
     if( acceptFd == -1 )
     {
@@ -201,28 +162,23 @@ void PushServer::acceptCB()
     LOG(INFO) << "accept succ, fd=" << acceptFd;
 
     SocketConnection* pConnection = new SocketConnection();
-    pConnection->pLoop = pMainLoop;
     pConnection->intFd = acceptFd;
     pConnection->status = csConnected;
     mapConnection[ acceptFd ] = pConnection;
 
-    ev_io_init( pConnection->readWatcher, readCallback, acceptFd, EV_READ );
-    ev_io_start( pMainLoop, pConnection->readWatcher );
+    pConnection->readWatcher->set( pConnection->intFd, ev::READ );
+    pConnection->readWatcher->set<PushServer, &PushServer::readCB>( this );
+    pConnection->readWatcher->start();
 
-    ev_init( pConnection->readTimer, readTimeoutCallback );
-    ev_timer_set( pConnection->readTimer, pConnection->readTimeout, 0.0 );
-    ev_timer_start( pMainLoop, pConnection->readTimer );
+    pConnection->readTimer->set( pConnection->readTimeout, 0.0 );
+    pConnection->readTimer->set<SocketConnection, &SocketConnection::readTimeoutCB>( pConnection );
+    pConnection->readTimer->start();
 
-    ev_io_init( pConnection->writeWatcher, writeCallback, acceptFd, EV_WRITE );
-    ev_init( pConnection->writeTimer, writeTimeoutCallback );
-}
+    pConnection->writeWatcher->set( pConnection->intFd, ev::WRITE );
+    pConnection->writeWatcher->set<PushServer, &PushServer::writeCB>( this );
 
-static void acceptCallback( EV_P_ ev_io *watcher, int revents )
-{
-    (void)loop;
-    (void)watcher;
-    (void)revents;
-    PushServer::getInstance()->acceptCB();
+    pConnection->writeTimer->set( pConnection->writeTimeout, 0.0 );
+    pConnection->writeTimer->set<SocketConnection, &SocketConnection::writeTimeoutCB>( pConnection );
 }
 
 static void check_multi_info()
@@ -251,9 +207,8 @@ static void check_multi_info()
                 pConnection->inBuf->intLen = 0;
                 pConnection->inBuf->intExpectLen = 0;
 
-                ev_io_start( pConnection->pLoop, pConnection->writeWatcher );
-                ev_timer_set( pConnection->writeTimer, pConnection->writeTimeout, 0.0 );
-                ev_timer_start( pConnection->pLoop, pConnection->writeTimer );
+                pConnection->writeWatcher->start();
+                pConnection->writeTimer->start();
             }
             else {
                 delete pConnection;
@@ -265,12 +220,11 @@ static void check_multi_info()
     }
 }
 
-static void event_cb(EV_P_ struct ev_io *w, int revents)
+void PushServer::curlSocketCB( ev::io &watcher, int revents )
 {
-    (void)loop;
-    int action = (revents&EV_READ ? CURL_POLL_IN : 0) | (revents&EV_WRITE ? CURL_POLL_OUT : 0);
+    int action = (revents&ev::READ ? CURL_POLL_IN : 0) | (revents&ev::WRITE ? CURL_POLL_OUT : 0);
     CURLMcode rc;
-    rc = curl_multi_socket_action(PushServer::getInstance()->multi, w->fd, action, &(PushServer::getInstance()->intCurlRunning));
+    rc = curl_multi_socket_action(PushServer::getInstance()->multi, watcher.fd, action, &(PushServer::getInstance()->intCurlRunning));
     if( rc != CURLM_OK ) {
         // TODO
     }
@@ -282,26 +236,26 @@ static int curlSocketCallback(CURL *e, curl_socket_t s, int what, void *cbp, voi
     (void)cbp;
     (void)sockp;
     SocketConnection *pConnection;
-    curl_easy_getinfo(e, CURLINFO_PRIVATE, &pConnection);
+    curl_easy_getinfo( e, CURLINFO_PRIVATE, &pConnection );
 
-    if(what == CURL_POLL_REMOVE)
+    if( what == CURL_POLL_REMOVE )
     {
-        ev_io_stop(PushServer::getInstance()->pMainLoop, pConnection->upstreamWatcher);
+        pConnection->upstreamWatcher->stop();
     }
     else
     {
-        int kind = (what&CURL_POLL_IN ? EV_READ : 0) | (what&CURL_POLL_OUT ? EV_WRITE : 0);
-        ev_io_stop(PushServer::getInstance()->pMainLoop, pConnection->upstreamWatcher);
-        ev_io_init(pConnection->upstreamWatcher, event_cb, s, kind);
-        ev_io_start(PushServer::getInstance()->pMainLoop, pConnection->upstreamWatcher);
+        int kind = (what&CURL_POLL_IN ? ev::READ : 0) | (what&CURL_POLL_OUT ? ev::WRITE : 0);
+        pConnection->upstreamWatcher->stop();
+        pConnection->upstreamWatcher->set( s, kind );
+        pConnection->upstreamWatcher->set<PushServer, &PushServer::curlSocketCB>( PushServer::getInstance() );
+        pConnection->upstreamWatcher->start();
     }
     return 0;
 }
 
-static void curlTimerCB(EV_P_ struct ev_timer *w, int revents)
+void PushServer::curlTimeoutCB( ev::timer &timer, int revents )
 {
-    (void)loop;
-    (void)w;
+    (void)timer;
     (void)revents;
 
     CURLMcode rc;
@@ -311,7 +265,7 @@ static void curlTimerCB(EV_P_ struct ev_timer *w, int revents)
     }
     check_multi_info();
 
-    std::cout << "curlTimerCB: " << PushServer::getInstance()->intCurlRunning << std::endl;
+    std::cout << "curlTimeoutCB: " << PushServer::getInstance()->intCurlRunning << std::endl;
 }
 
 static int curlTimerCallback(CURLM *multi, long timeout_ms, void *g)
@@ -320,14 +274,15 @@ static int curlTimerCallback(CURLM *multi, long timeout_ms, void *g)
     (void)multi;
     (void)g;
     PushServer* pPushServer = PushServer::getInstance();
-    ev_timer_stop(pPushServer->pMainLoop, pPushServer->curlMultiTimer);
+    pPushServer->curlMultiTimer->stop();
 
     if( timeout_ms == 0 ) {
-        curlTimerCB(pPushServer->pMainLoop, pPushServer->curlMultiTimer, 0);
+        pPushServer->curlTimeoutCB( *(pPushServer->curlMultiTimer), 0 );
     } else {
         double t = timeout_ms / 1000;
-        ev_timer_init(pPushServer->curlMultiTimer, curlTimerCB, t, 0.0);
-        ev_timer_start(pPushServer->pMainLoop, pPushServer->curlMultiTimer);
+        pPushServer->curlMultiTimer->set( t, 0.0 );
+        pPushServer->curlMultiTimer->set<PushServer, &PushServer::curlTimeoutCB>( pPushServer );
+        pPushServer->curlMultiTimer->start();
     }
     return 0;
 }
@@ -371,9 +326,7 @@ void PushServer::start()
     }
     LOG(INFO) << "server start, listen port=" << intListenPort << " fd=" << intListenFd;
 
-    listenWatcher = new ev_io();
-    ev_io_init( listenWatcher, acceptCallback, intListenFd, EV_READ );
-    ev_io_start( pMainLoop, listenWatcher );
-    ev_run( pMainLoop, 0 );
-    curl_multi_cleanup( multi );
+    listenWatcher->set<PushServer, &PushServer::acceptCB>( this );
+    listenWatcher->start( intListenFd, ev::READ );
+    mainLoop.run( 0 );
 }

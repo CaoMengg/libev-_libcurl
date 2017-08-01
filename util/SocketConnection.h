@@ -6,7 +6,8 @@
 #include <list>
 #include <stdlib.h>
 #include <unistd.h>
-#include <ev.h>
+#include <ev++.h>
+#include "GLog.h"
 #include "SocketBuffer.h"
 
 typedef std::list<SocketBuffer *> bufferList;
@@ -26,67 +27,48 @@ class SocketConnection
             inBuf = new SocketBuffer( 1024 );
             upstreamBuf = new SocketBuffer( 1024 );
 
-            readWatcher = new ev_io();
-            writeWatcher = new ev_io();
-            readTimer = new ev_timer();
+            readWatcher = new ev::io();
+            writeWatcher = new ev::io();
+            readTimer = new ev::timer();
             readTimer->data = this;
-            writeTimer = new ev_timer();
+            writeTimer = new ev::timer();
             writeTimer->data = this;
 
-            upstreamWatcher = new ev_io();
+            upstreamWatcher = new ev::io();
         }
         ~SocketConnection() {
-            if( readWatcher && pLoop ) {
-                ev_io_stop( pLoop, readWatcher );
-                delete readWatcher;
-            }
-            if( writeWatcher && pLoop ) {
-                ev_io_stop( pLoop, writeWatcher );
-                delete writeWatcher;
-            }
+            delete readWatcher;
+            delete writeWatcher;
+            delete readTimer;
+            delete writeTimer;
 
-            if( readTimer && pLoop ) {
-                ev_timer_stop( pLoop, readTimer );
-                delete readTimer;
-            }
-            if( writeTimer && pLoop ) {
-                ev_timer_stop( pLoop, writeTimer );
-                delete writeTimer;
-            }
-
-            if( upstreamWatcher && pLoop ) {
-                ev_io_stop( pLoop, upstreamWatcher );
-                delete upstreamWatcher;
-            }
+            delete upstreamWatcher;
 
             if( intFd ) {
                 close( intFd );
             }
 
-            if( inBuf ) {
-                delete inBuf;
-            }
-
-            if( upstreamBuf ) {
-                delete upstreamBuf;
-            }
+            delete inBuf;
+            delete upstreamBuf;
 
             while( ! outBufList.empty() ) {
                 delete outBufList.front();
                 outBufList.pop_front();
             }
         }
-        struct ev_loop *pLoop = NULL;
+        void readTimeoutCB( ev::timer &timer, int revents );
+        void writeTimeoutCB( ev::timer &timer, int revents );
+
         int intFd = 0;
         enumConnectionStatus status = csInit;
-        ev_io *readWatcher = NULL;
-        ev_io *writeWatcher = NULL;
-        ev_timer *readTimer = NULL;
-        ev_tstamp readTimeout = 3.0;
-        ev_timer *writeTimer = NULL;
-        ev_tstamp writeTimeout = 3.0;
+        ev::io *readWatcher = NULL;
+        ev::io *writeWatcher = NULL;
+        ev::timer *readTimer = NULL;
+        ev::tstamp readTimeout = 3.0;
+        ev::timer *writeTimer = NULL;
+        ev::tstamp writeTimeout = 3.0;
 
-        ev_io *upstreamWatcher = NULL;
+        ev::io *upstreamWatcher = NULL;
 
         SocketBuffer *inBuf = NULL;
         SocketBuffer *upstreamBuf = NULL;
