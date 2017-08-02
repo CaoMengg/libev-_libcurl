@@ -67,13 +67,15 @@ void PushServer::writeCB( ev::io &watcher, int revents )
     LOG(INFO) << "ack query succ, fd=" << pConnection->intFd;
 }
 
-static size_t write_cb(void *ptr, size_t size, size_t nmemb, void *data)
+static size_t curlWriteCB(void *ptr, size_t size, size_t nmemb, void *data)
 {
     size_t realsize = size * nmemb;
     SocketConnection * pConnection = (SocketConnection *)data;
-    //memcpy( pConnection->upstreamBuf->data + pConnection->upstreamBuf->intLen, ptr, realsize );
+    while( int(pConnection->upstreamBuf->intLen+realsize) > pConnection->upstreamBuf->intSize ) {
+        pConnection->upstreamBuf->enlarge();
+    }
+    memcpy( pConnection->upstreamBuf->data + pConnection->upstreamBuf->intLen, ptr, realsize );
     pConnection->upstreamBuf->intLen += realsize;
-    std::cout << (char *)ptr << std::endl;
     return realsize;
 }
 
@@ -86,7 +88,7 @@ void PushServer::parseQuery( SocketConnection *pConnection )
     CURL *easy = curl_easy_init();
     curl_easy_setopt(easy, CURLOPT_URL, docJson[0]["push_url"].GetString());
     curl_easy_setopt(easy, CURLOPT_POSTFIELDS, docJson[0]["push_data"].GetString());
-    curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, write_cb);
+    curl_easy_setopt(easy, CURLOPT_WRITEFUNCTION, curlWriteCB);
     curl_easy_setopt(easy, CURLOPT_WRITEDATA, pConnection);
     curl_easy_setopt(easy, CURLOPT_PRIVATE, pConnection);
     //curl_easy_setopt(easy, CURLOPT_VERBOSE, 1L);
@@ -196,12 +198,10 @@ static void check_multi_info()
 
             res = msg->data.result;
             if( res == 0 ) {
-                char outText[6] = "world";
-                int outTextLen = strlen( outText );
                 SocketBuffer* outBuf;
-                outBuf = new SocketBuffer( outTextLen + 1 );
-                outBuf->intLen = outTextLen;
-                strncpy( (char*)outBuf->data, outText, outTextLen+1 );
+                outBuf = new SocketBuffer( pConnection->upstreamBuf->intLen );
+                memcpy( outBuf->data, pConnection->upstreamBuf->data, pConnection->upstreamBuf->intLen );
+                outBuf->intLen = pConnection->upstreamBuf->intLen;
                 pConnection->outBufList.push_back( outBuf );
 
                 pConnection->inBuf->intLen = 0;
@@ -265,7 +265,7 @@ void PushServer::curlTimeoutCB( ev::timer &timer, int revents )
     }
     check_multi_info();
 
-    std::cout << "curlTimeoutCB: " << PushServer::getInstance()->intCurlRunning << std::endl;
+    //std::cout << "curlTimeoutCB: " << PushServer::getInstance()->intCurlRunning << std::endl;
 }
 
 static int curlTimerCallback(CURLM *multi, long timeout_ms, void *g)
